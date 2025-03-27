@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "ssltrace"
+version = "0.1.0"
+description = "BCC-based tool to trace OpenSSL read/write data and endpoints"
+authors = ["Your Name <you@example.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+bcc = "^0.27.0"  # Adjust if you're using a specific version
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
