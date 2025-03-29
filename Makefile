@@ -31,12 +31,7 @@ check-bcc:
 	(echo '❌ bcc still not found! Make sure apt installed it.' && exit 1)
 
 run: setup
-	@echo "🔍 Getting libssl and libc path for container: $(CONTAINER)"
-	@LIBSSL_PATH=$$(./find_openssl_lib.sh $(CONTAINER)) && \
-	LIBC_PATH=$$(./find_libc.sh $(CONTAINER)) && \
-	HOST_PID=$$(docker inspect --format '{{.State.Pid}}' $(CONTAINER)) && \
-	echo "📎 Attaching to PID $$HOST_PID using libssl: $$LIBSSL_PATH and libc: $$LIBC_PATH" && \
-	sudo python3 ssltrace.py -p $$HOST_PID --libssl $$LIBSSL_PATH --libc $$LIBC_PATH
+	sudo python3 ssltrace.py
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -r {} +
