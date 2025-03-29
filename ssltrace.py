@@ -46,7 +46,6 @@ struct event_t {
 #define BASE_EVENT_SIZE ((size_t)(&((struct event_t*)0)->data))
 #define EVENT_SIZE(X) (BASE_EVENT_SIZE + ((size_t)(X)))
 
-BPF_HASH(getpeername_args, u32, struct sockaddr*);
 BPF_HASH(ssl_to_fd, u64, struct pid_fd_t);
 BPF_HASH(fd_to_endpoint, struct pid_fd_t, struct endpoint_t);
 BPF_PERCPU_ARRAY(event_buffer, struct event_t, 1);
@@ -70,38 +69,6 @@ int trace_accept_return(struct pt_regs *ctx) {
     // No IP at this point, will be resolved later via getpeername
     struct endpoint_t empty = {};
     fd_to_endpoint.update(&pidfd, &empty);
-    return 0;
-}
-
-// getpeername: resolve IP/port for a (pid, fd)
-int trace_getpeername_entry(struct pt_regs *ctx, int sockfd, struct sockaddr *addr, int *addrlen) {
-    u32 pid = bpf_get_current_pid_tgid();
-    getpeername_args.update(&pid, &addr);
-    return 0;
-}
-
-int trace_getpeername_return(struct pt_regs *ctx) {
-    u32 pid = bpf_get_current_pid_tgid();
-    struct sockaddr **addrp = getpeername_args.lookup(&pid);
-    if (!addrp) return 0;
-
-    struct sockaddr *addr = *addrp;
-    getpeername_args.delete(&pid);
-    if (!addr) return 0;
-
-    u16 family = 0;
-    bpf_probe_read(&family, sizeof(family), &addr->sa_family);
-    if (family != AF_INET) return 0;
-
-    struct pid_fd_t pidfd = {};
-    pidfd.pid = pid;
-    pidfd.fd = PT_REGS_PARM1(ctx);  // original sockfd
-
-    struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-    struct endpoint_t info = {};
-    bpf_probe_read(&info.ip, sizeof(info.ip), &addr_in->sin_addr.s_addr);
-    bpf_probe_read(&info.port, sizeof(info.port), &addr_in->sin_port);
-    fd_to_endpoint.update(&pidfd, &info);
     return 0;
 }
 
@@ -178,46 +145,46 @@ int trace_ssl_write(struct pt_regs *ctx, void *ssl, const void *buf, int num) {
 
 """
 
-# Load BPF with suppressed warnings
-b = BPF(text=bpf_source, cflags=["-Wno-duplicate-decl-specifier", "-Wno-address-of-packed-member"])
+# # Load BPF with suppressed warnings
+# b = BPF(text=bpf_source, cflags=["-Wno-duplicate-decl-specifier", "-Wno-address-of-packed-member"])
 
-def get_container_pid(name):
-    try:
-        output = subprocess.check_output(["docker", "inspect", "--format", "{{.State.Pid}}", name])
-        return int(output.decode().strip())
-    except Exception as e:
-        print(f"[!] Failed to get PID for container '{name}': {e}")
-        return None
+# def get_container_pid(name):
+#     try:
+#         output = subprocess.check_output(["docker", "inspect", "--format", "{{.State.Pid}}", name])
+#         return int(output.decode().strip())
+#     except Exception as e:
+#         print(f"[!] Failed to get PID for container '{name}': {e}")
+#         return None
 
-# Utility: find a file under /proc/[pid]/root matching pattern
-def find_library_under_proc_root(pid, pattern):
-    root_path = f"/proc/{pid}/root"
-    for dirpath, _, filenames in os.walk(root_path):
-        for filename in filenames:
-            if fnmatch.fnmatch(filename, pattern):
-                full_path = os.path.join(dirpath, filename)
-                if os.path.isfile(full_path):
-                    return full_path
-    return None
+# # Utility: find a file under /proc/[pid]/root matching pattern
+# def find_library_under_proc_root(pid, pattern):
+#     root_path = f"/proc/{pid}/root"
+#     for dirpath, _, filenames in os.walk(root_path):
+#         for filename in filenames:
+#             if fnmatch.fnmatch(filename, pattern):
+#                 full_path = os.path.join(dirpath, filename)
+#                 if os.path.isfile(full_path):
+#                     return full_path
+#     return None
 
-target_names = ["python_client", "tls_server"]
-targets = []
-for name in target_names:
-    pid = get_container_pid(name)
-    libc_path = find_library_under_proc_root(pid, "libc.so.6")
-    libssl_path = find_library_under_proc_root(pid, "libssl.so*")
-    if not libc_path or not libssl_path:
-        print(f"[!] Skipping PID {pid} (missing libc or libssl)")
-        continue
-    targets.append((pid, libssl_path, libc_path))
+# target_names = ["python_client", "tls_server"]
+# targets = []
+# for name in target_names:
+#     pid = get_container_pid(name)
+#     libc_path = find_library_under_proc_root(pid, "libc.so.6")
+#     libssl_path = find_library_under_proc_root(pid, "libssl.so*")
+#     if not libc_path or not libssl_path:
+#         print(f"[!] Skipping PID {pid} (missing libc or libssl)")
+#         continue
+#     targets.append((pid, libssl_path, libc_path))
 
-if not targets:
-    print("[-] No valid processes found. Exiting.")
-    exit(1)
+# if not targets:
+#     print("[-] No valid processes found. Exiting.")
+#     exit(1)
 
-print("Resolved library paths for:")
-for pid, libssl_path, libc_path in targets:
-    print(f"  PID={pid} libssl={libssl_path} libc={libc_path}")
+# print("Resolved library paths for:")
+# for pid, libssl_path, libc_path in targets:
+#     print(f"  PID={pid} libssl={libssl_path} libc={libc_path}")
 
 
 b = BPF(text=bpf_source, cflags=["-Wno-duplicate-decl-specifier", "-Wno-address-of-packed-member"])
